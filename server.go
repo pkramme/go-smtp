@@ -69,6 +69,31 @@ type Server struct {
 	conns     map[*Conn]struct{}
 }
 
+// Hacked in method for setting library internals inside the server
+func (server *Server) UpdateConfig(be Backend) {
+	server.done = make(chan struct{}, 1)
+	server.caps = []string{"PIPELINING", "8BITMIME", "ENHANCEDSTATUSCODES", "CHUNKING"}
+	server.auths = map[string]SaslServerFactory{
+		sasl.Plain: func(conn *Conn) sasl.Server {
+			return sasl.NewPlainServer(func(identity, username, password string) error {
+				if identity != "" && identity != username {
+					return errors.New("Identities not supported")
+				}
+
+				state := conn.State()
+				session, err := be.Login(&state, username, password)
+				if err != nil {
+					return err
+				}
+
+				conn.SetSession(session)
+				return nil
+			})
+		},
+	}
+	server.conns = make(map[*Conn]struct{})
+}
+
 // New creates a new SMTP server.
 func NewServer(be Backend) *Server {
 	return &Server{
